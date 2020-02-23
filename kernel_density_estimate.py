@@ -1,29 +1,19 @@
 #!/usr/bin/python
 import argparse
-import csv
-import decimal
-import logging
-import os
 import pickle
-import sys
-import time
-import typing # Typing introduces slight startup time penalties
 from decimal import Decimal, getcontext
-from functools import reduce
 from math import pi
-from operator import mul
-from typing import Any, Tuple
 import gzip
- 
 import matplotlib.cm as cm
 import numpy as np
 import numpy.matlib
 from matplotlib import pyplot as plt
+import timeit
 getcontext().prec = 7 # Precision for decimal
 
 parser = argparse.ArgumentParser(description='Kernel Density Estimation')
 parser.add_argument("--data", default="cifar", help="data type: either cifar or mnist")
-parser.add_argument("--sample_size", default=100, help="number of data points to compute density estimates")
+parser.add_argument("--sample_size", default=1000, help="number of data points to compute density estimates")
 
 
 
@@ -66,11 +56,10 @@ def load_data_mnist(mnist_f="mnist.pkl.gz"):
  Fuction to load and preprocess CIFAR dataset 
  returns: Preprocessed train, valid and test datasets from MNIST
 """
-def load_cifar(train_dir, test_dir):
+def load_data_cifar(train_dir, test_dir):
     seed = 111
     np.random.seed(seed)
     unpickled_train, unpickled_test = (load_pickle(train_dir), load_pickle(test_dir))
-    print(unpickled_train["data"].shape)
     x_train_raw = unpickled_train["data"].astype(np.float64)
     x_train_raw = x_train_raw / 255  # Scaling pixel values between 0 and 1
     np.random.shuffle(x_train_raw) # Shuffling the original training set
@@ -85,7 +74,7 @@ def load_cifar(train_dir, test_dir):
  Function to visualize the loaded dataset
  returns: plot data
 """
-def visualize(image_data, num_img_edge, pixel_rows, pixel_cols,image_channels):
+def viz(image_data, num_img_edge, pixel_rows, pixel_cols,image_channels):
     N = num_img_edge**2
     n=num_img_edge
     D = image_channels
@@ -103,43 +92,49 @@ def visualize(image_data, num_img_edge, pixel_rows, pixel_cols,image_channels):
 """
  Function to implement kernel density estimation
 """
-def kde_scratch(sigma, D_A, D_B):
-	getcontext().prec = 7
-	mu, prob_x = D_A.astype(np.float64), 0
-	len_D_A, len_D_B, d = len(D_A), len(D_B), len(D_A[0])
+def kde_compute(sigma, D_train, D_val):
+	mu, prob_x = D_train.astype(np.float64), 0
+	len_D_train, len_D_val, d = len(D_train), len(D_val), len(D_train[0])
 	t_1 = -Decimal(0.5 * d) * Decimal(2 * pi * (sigma ** 2)).ln()
-	log_k = Decimal(len_D_A).ln()
+	log_k = Decimal(len_D_train).ln()
 	
-	for i in  range(0, len_D_A):
-		t_0 = np.sum((-((np.matlib.repmat(D_B[i], len_D_A, 1).astype(np.float64) - mu) ** 2)) / (2 * (sigma ** 2)), axis=1)
+	for i in  range(0, len_D_train):
+		t_0 = np.sum((-((np.matlib.repmat(D_val[i], len_D_train, 1).astype(np.float64) - mu) ** 2)) / (2 * (sigma ** 2)), axis=1)
 		elements_sum = 0
-		for j in  range(0, len_D_B):
+		for j in  range(0, len_D_val):
 			elements_sum += Decimal(t_0[j]).exp()
 		prob_x += t_1 - log_k + elements_sum.ln()
-	return prob_x / len_D_B
+	return prob_x / len_D_val
 
 if __name__=="__main__":
     args = parser.parse_args()
     dataset = args.data
-    n_samples=args.sample_size
+    n_samples=int(args.sample_size)
     print("processing dataset ...",dataset)
-    if (dataset == 'mnist' or dataset == 'MNIST'):
+    if dataset in ['mnist' ,'MNIST']:
         X_train, X_valid, X_test = load_data_mnist(mnist_f="./mnist.pkl.gz")
-        print(X_train.shape)
-        img = visualize(X_train, num_img_edge=20, pixel_rows=28, pixel_cols=28, image_channels=1)
+        print("Shape of Train Set",X_train.shape)
+        print("Shape of Vlidation Set",X_valid.shape)
+        print("Shape of Test Set",X_test.shape)
+        img = viz(X_train, num_img_edge=20, pixel_rows=28, pixel_cols=28, image_channels=1)
         img.savefig(dataset+'.png')
-    elif dataset in ["CIFAR100", "cifar100", "CIFAR", "cifar"]:
-        X_train, X_valid, X_test = load_cifar(train_dir="./cifar-100-python/train",test_dir="./cifar-100-python/test")
-        print(X_train.shape)
-        img = visualize(X_train, num_img_edge=20, pixel_rows=32, pixel_cols=32, image_channels=3)
+    elif dataset in ["CIFAR", "cifar"]:
+        X_train, X_valid, X_test = load_data_cifar(train_dir="./cifar-100-python/train",test_dir="./cifar-100-python/test")
+        print("Shape of Train Set",X_train.shape)
+        print("Shape of Vlidation Set",X_valid.shape)
+        print("Shape of Test Set",X_test.shape)
+        img = viz(X_train, num_img_edge=20, pixel_rows=32, pixel_cols=32, image_channels=3)
         img.savefig(dataset+'.png')
     else:
         print("Please Enter one of CIFAR or MNIST")
         
     sigma = [0.05, 0.08, 0.10, 0.20, 0.50, 1.00, 1.50, 2.00] # Grid search
     L_valid = [] # list to store mean of log-likelihood values
+    starttime = timeit.default_timer()
     for sg in sigma:
         print("Training with sigma = {}".format(sg))
-        kde_prob = kde_scratch(sg, X_train[0:n_samples], X_valid[0:n_samples])
+        kde_prob = kde_compute(sg, X_train[0:n_samples], X_valid[0:n_samples])
         print ("L_D_valid with sigma {} = {}".format(sg, kde_prob))
         L_valid.append(kde_prob)
+    print("The time taken is :", timeit.default_timer() - starttime)
+    print("Validation Liklihoods: ",L_valid)
