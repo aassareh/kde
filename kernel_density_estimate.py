@@ -12,9 +12,8 @@ import timeit
 getcontext().prec = 7 # Precision for decimal
 
 parser = argparse.ArgumentParser(description='Kernel Density Estimation')
-parser.add_argument("--data", default="cifar", help="data type: either cifar or mnist")
+parser.add_argument("--data", default="mnist", help="data type: either cifar or mnist")
 parser.add_argument("--sample_size", default=1000, help="number of data points to compute density estimates")
-
 
 
 """
@@ -92,24 +91,24 @@ def viz(image_data, num_img_edge, pixel_rows, pixel_cols,image_channels):
 """
  Function to implement kernel density estimation
 """
+
+#from scipy.special import expit, logit
 def kde_compute(sigma, D_train, D_val):
-	mu, prob_x = D_train.astype(np.float64), 0
-	len_D_train, len_D_val, d = len(D_train), len(D_val), len(D_train[0])
-	t_1 = -Decimal(0.5 * d) * Decimal(2 * pi * (sigma ** 2)).ln()
-	log_k = Decimal(len_D_train).ln()
-	
-	for i in  range(0, len_D_train):
-		t_0 = np.sum((-((np.matlib.repmat(D_val[i], len_D_train, 1).astype(np.float64) - mu) ** 2)) / (2 * (sigma ** 2)), axis=1)
-		elements_sum = 0
-		for j in  range(0, len_D_val):
-			elements_sum += Decimal(t_0[j]).exp()
-		prob_x += t_1 - log_k + elements_sum.ln()
-	return prob_x / len_D_val
+    likelihood =  0
+    train_size, val_size, num_features = len(D_train), len(D_val), len(D_train[0])
+    term_0 = -Decimal(train_size).ln()
+    term_2 = -Decimal(0.5 * num_features) * Decimal(2 * pi * (sigma ** 2)).ln()
+    for i in  range(0, val_size):
+        w = np.sum((-((np.matlib.repmat(D_val[i], train_size, 1).astype(np.float64) - D_train.astype(np.float64)) ** 2)) / (2 * (sigma ** 2)), axis=1)
+        wmax = np.max(w)
+        term_1 = Decimal(wmax + np.log(np.sum(np.exp(w-wmax))))
+        likelihood +=  term_0 + term_1 + term_2
+    return likelihood / val_size
 
 if __name__=="__main__":
     args = parser.parse_args()
     dataset = args.data
-    n_samples=int(args.sample_size)
+    n_samples=min(int(args.sample_size),10000)
     print("processing dataset ...",dataset)
     if dataset in ['mnist' ,'MNIST']:
         X_train, X_valid, X_test = load_data_mnist(mnist_f="./mnist.pkl.gz")
@@ -132,9 +131,18 @@ if __name__=="__main__":
     L_valid = [] # list to store mean of log-likelihood values
     starttime = timeit.default_timer()
     for sg in sigma:
-        print("Training with sigma = {}".format(sg))
+        #print("calculating liklelihood with sigma = {}".format(sg))
         kde_prob = kde_compute(sg, X_train[0:n_samples], X_valid[0:n_samples])
-        print ("L_D_valid with sigma {} = {}".format(sg, kde_prob))
+        print ("likelihood with sigma {} = {}".format(sg, kde_prob))
         L_valid.append(kde_prob)
+    print("The time taken is :", timeit.default_timer() - starttime)
+    print("Validation Liklihoods: ",L_valid)
+    
+    #######################
+    sg=sigma[np.argmax(L_valid)]
+    starttime = timeit.default_timer()
+    kde_prob = kde_compute(sg, X_train, X_valid)
+    print ("likelihood with best sigma {} = {}".format(sg, kde_prob))
+    L_valid.append(kde_prob)
     print("The time taken is :", timeit.default_timer() - starttime)
     print("Validation Liklihoods: ",L_valid)
